@@ -195,5 +195,7 @@
   "finger_min_fingers": "Au moins 2 doigts requis",
   "enter_player2_name": "Entrez le nom du Joueur 2",
   "player2_name_hint": "Nom",
-  "start": "Commencer"
+  "start": "Commencer",
+  "choose_color": "Choisissez votre couleur",
+  "random": "Aléatoire"
 }

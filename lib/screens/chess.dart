@@ -122,6 +122,9 @@ class ChessScreenState extends State<ChessScreen> {
   String _player1Name = '';
   String _player2Name = '';
 
+  // Color assignment: true = player1 plays white, false = player1 plays black
+  bool _player1IsWhite = true;
+
   void _initBoard() {
     _board = [
       [bRook, bKnight, bBishop, bQueen, bKing, bBishop, bKnight, bRook],
@@ -154,12 +157,92 @@ class ChessScreenState extends State<ChessScreen> {
       _showPlayer2NameDialog();
       return;
     }
+    if (mode == ChessMode.bot && difficulty != null) {
+      _botDifficulty = difficulty;
+      _showColorPickDialog();
+      return;
+    }
     setState(() {
       _mode = mode;
       if (difficulty != null) _botDifficulty = difficulty;
       _gameStarted = true;
       _initBoard();
     });
+  }
+
+  void _showColorPickDialog() {
+    final c = context.appColors;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(translate("choose_color"), textAlign: TextAlign.center),
+        content: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildColorOption(ctx, c, translate("white"), wKing, true),
+            _buildColorOption(ctx, c, translate("random"), 0, null),
+            _buildColorOption(ctx, c, translate("black"), bKing, false),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildColorOption(
+    BuildContext ctx,
+    AppColors c,
+    String label,
+    int pieceType,
+    bool? isWhite,
+  ) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(ctx).pop();
+        setState(() {
+          if (isWhite == null) {
+            _player1IsWhite = Random().nextBool();
+          } else {
+            _player1IsWhite = isWhite;
+          }
+          _mode = ChessMode.bot;
+          _gameStarted = true;
+          _initBoard();
+          if (!_player1IsWhite) {
+            _doBotMove();
+          }
+        });
+      },
+      child: Container(
+        width: 80,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: c.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (pieceType != 0)
+              pieceWidget(pieceType, 36)
+            else
+              const Text("🎲", style: TextStyle(fontSize: 32)),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: c.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showPlayer2NameDialog() {
@@ -197,6 +280,7 @@ class ChessScreenState extends State<ChessScreen> {
                     ? authService.username
                     : translate("player_1");
                 _player2Name = name.isNotEmpty ? name : translate("player_2");
+                _player1IsWhite = Random().nextBool();
                 _mode = ChessMode.friend;
                 _gameStarted = true;
                 _initBoard();
@@ -538,10 +622,15 @@ class ChessScreenState extends State<ChessScreen> {
 
       // Pawn promotion
       if (piece == wPawn && toR == 0) {
-        _showPromotionDialog(toR, toC, true);
-        return;
+        if (_mode == ChessMode.bot && !_player1IsWhite) {
+          // Bot auto-promotes to queen
+          _board[toR][toC] = wQueen;
+        } else {
+          _showPromotionDialog(toR, toC, true);
+          return;
+        }
       } else if (piece == bPawn && toR == 7) {
-        if (_mode == ChessMode.bot) {
+        if (_mode == ChessMode.bot && _player1IsWhite) {
           // Bot auto-promotes to queen
           _board[toR][toC] = bQueen;
         } else {
@@ -553,7 +642,8 @@ class ChessScreenState extends State<ChessScreen> {
       _whiteToMove = !_whiteToMove;
       _checkGameState();
 
-      if (_mode == ChessMode.bot && !_whiteToMove && !_gameOver) {
+      final botTurn = _player1IsWhite ? !_whiteToMove : _whiteToMove;
+      if (_mode == ChessMode.bot && botTurn && !_gameOver) {
         _doBotMove();
       }
     });
@@ -585,9 +675,10 @@ class ChessScreenState extends State<ChessScreen> {
                         _board[row][col] = p;
                         _whiteToMove = !_whiteToMove;
                         _checkGameState();
-                        if (_mode == ChessMode.bot &&
-                            !_whiteToMove &&
-                            !_gameOver) {
+                        final botTurn = _player1IsWhite
+                            ? !_whiteToMove
+                            : _whiteToMove;
+                        if (_mode == ChessMode.bot && botTurn && !_gameOver) {
                           _doBotMove();
                         }
                       });
@@ -667,10 +758,11 @@ class ChessScreenState extends State<ChessScreen> {
   }
 
   List<int>? _getBotMove() {
+    final botIsWhite = !_player1IsWhite;
     final allMoves = <List<int>>[];
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
-        if (isBlack(_board[r][c])) {
+        if (botIsWhite ? isWhite(_board[r][c]) : isBlack(_board[r][c])) {
           for (final m in _getLegalMoves(r, c)) {
             allMoves.add([r, c, m[0], m[1]]);
           }
@@ -708,14 +800,17 @@ class ChessScreenState extends State<ChessScreen> {
 
   int _evaluateBoard() {
     int score = 0;
+    final botIsWhite = !_player1IsWhite;
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         final p = _board[r][c];
         if (p == empty) continue;
         final val = _pieceValues[p] ?? 0;
-        score += isWhite(p)
-            ? -val
-            : val; // Bot is black, positive = good for bot
+        if (botIsWhite) {
+          score += isWhite(p) ? val : -val;
+        } else {
+          score += isBlack(p) ? val : -val;
+        }
       }
     }
     return score;
@@ -752,15 +847,16 @@ class ChessScreenState extends State<ChessScreen> {
   }
 
   List<int> _botExpert(List<List<int>> moves) {
+    final botIsWhite = !_player1IsWhite;
     int bestScore = -999999;
     List<int> bestMove = moves[0];
     for (final m in moves) {
       final saved = _simulateMove(m);
-      // Look one move ahead for white's response
+      // Look one move ahead for player's response
       int worstResponse = 999999;
       for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
-          if (isWhite(_board[r][c])) {
+          if (botIsWhite ? isBlack(_board[r][c]) : isWhite(_board[r][c])) {
             for (final wm in _getLegalMoves(r, c)) {
               final saved2 = _simulateMoveRaw(r, c, wm[0], wm[1]);
               final eval = _evaluateBoard();
@@ -837,7 +933,16 @@ class ChessScreenState extends State<ChessScreen> {
             TextButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                setState(() => _initBoard());
+                if (_mode == ChessMode.friend) {
+                  setState(() {
+                    _player1IsWhite = !_player1IsWhite;
+                    _initBoard();
+                  });
+                } else if (_mode == ChessMode.bot) {
+                  _showColorPickDialog();
+                } else {
+                  setState(() => _initBoard());
+                }
               },
               child: Text(translate("new_game")),
             ),
@@ -1215,7 +1320,7 @@ class ChessScreenState extends State<ChessScreen> {
           const SizedBox(height: 8),
           _buildGameHeader(c),
           const SizedBox(height: 12),
-          _buildChessBoard(c, false),
+          _buildChessBoard(c, !_player1IsWhite),
           const SizedBox(height: 12),
           _buildActionBar(c),
           const SizedBox(height: 20),
@@ -1227,6 +1332,19 @@ class ChessScreenState extends State<ChessScreen> {
   // ─── FRIEND GAME ───
 
   Widget _buildFriendGame(AppColors c) {
+    // Player 1 is always at the bottom, Player 2 always at the top
+    // Their colors depend on _player1IsWhite
+    final p1Piece = _player1IsWhite ? wKing : bKing;
+    final p2Piece = _player1IsWhite ? bKing : wKing;
+    final p1Label = _player1IsWhite ? translate("white") : translate("black");
+    final p2Label = _player1IsWhite ? translate("black") : translate("white");
+    final p1Active = _player1IsWhite
+        ? (_whiteToMove && !_gameOver)
+        : (!_whiteToMove && !_gameOver);
+    final p2Active = _player1IsWhite
+        ? (!_whiteToMove && !_gameOver)
+        : (_whiteToMove && !_gameOver);
+
     return Scaffold(
       backgroundColor: c.surface,
       body: SafeArea(
@@ -1239,23 +1357,23 @@ class ChessScreenState extends State<ChessScreen> {
                 child: _buildPlayerArea(
                   c,
                   playerName: _player2Name,
-                  pieceType: bKing,
-                  isActive: !_whiteToMove && !_gameOver,
-                  label: translate("black"),
-                  isBlackSide: true,
+                  pieceType: p2Piece,
+                  isActive: p2Active,
+                  label: p2Label,
+                  isBlackSide: !_player1IsWhite,
                 ),
               ),
             ),
-            Expanded(child: _buildChessBoard(c, false)),
+            Expanded(child: _buildChessBoard(c, !_player1IsWhite)),
             SizedBox(
               height: 70,
               child: _buildPlayerArea(
                 c,
                 playerName: _player1Name,
-                pieceType: wKing,
-                isActive: _whiteToMove && !_gameOver,
-                label: translate("white"),
-                isBlackSide: false,
+                pieceType: p1Piece,
+                isActive: p1Active,
+                label: p1Label,
+                isBlackSide: _player1IsWhite ? false : true,
                 showActions: true,
               ),
             ),
@@ -1518,10 +1636,12 @@ class ChessScreenState extends State<ChessScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: Column(
-                    children: List.generate(8, (row) {
+                    children: List.generate(8, (i) {
+                      final row = flipped ? 7 - i : i;
                       return Expanded(
                         child: Row(
-                          children: List.generate(8, (col) {
+                          children: List.generate(8, (j) {
+                            final col = flipped ? 7 - j : j;
                             final isLight = (row + col) % 2 == 0;
                             final piece = _board[row][col];
                             final isSelected =
@@ -1566,7 +1686,9 @@ class ChessScreenState extends State<ChessScreen> {
                                         Center(
                                           child:
                                               _mode == ChessMode.friend &&
-                                                  isBlack(piece)
+                                                  (_player1IsWhite
+                                                      ? isBlack(piece)
+                                                      : isWhite(piece))
                                               ? Transform.rotate(
                                                   angle: 3.14159,
                                                   child: pieceWidget(
