@@ -197,5 +197,9 @@
   "player2_name_hint": "İsim",
   "start": "Başla",
   "choose_color": "Rengini Seç",
-  "random": "Rastgele"
+  "random": "Rastgele",
+  "drawing_color": "Renkler çekiliyor...",
+  "color_decided": "Renkler belirlendi!",
+  "white_starts": "Beyaz başlar",
+  "lets_play": "Oynayalım"
 }

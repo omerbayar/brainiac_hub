@@ -197,5 +197,9 @@
   "player2_name_hint": "Nume",
   "start": "Start",
   "choose_color": "Alege culoarea ta",
-  "random": "Aleatoriu"
+  "random": "Aleatoriu",
+  "drawing_color": "Se trag culorile...",
+  "color_decided": "Culorile au fost decise!",
+  "white_starts": "Albul începe",
+  "lets_play": "Să jucăm"
 }

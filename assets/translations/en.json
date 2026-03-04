@@ -197,5 +197,9 @@
   "player2_name_hint": "Name",
   "start": "Start",
   "choose_color": "Choose Your Color",
-  "random": "Random"
+  "random": "Random",
+  "drawing_color": "Drawing colors...",
+  "color_decided": "Colors decided!",
+  "white_starts": "White starts",
+  "lets_play": "Let's Play"
 }

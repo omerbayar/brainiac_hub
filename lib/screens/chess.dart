@@ -275,20 +275,39 @@ class ChessScreenState extends State<ChessScreen> {
             onPressed: () {
               Navigator.of(ctx).pop();
               final name = controller.text.trim();
-              setState(() {
-                _player1Name = authService.username.isNotEmpty
-                    ? authService.username
-                    : translate("player_1");
-                _player2Name = name.isNotEmpty ? name : translate("player_2");
-                _player1IsWhite = Random().nextBool();
-                _mode = ChessMode.friend;
-                _gameStarted = true;
-                _initBoard();
-              });
+              _player1Name = authService.username.isNotEmpty
+                  ? authService.username
+                  : translate("player_1");
+              _player2Name = name.isNotEmpty ? name : translate("player_2");
+              _player1IsWhite = Random().nextBool();
+              _showColorRevealDialog();
             },
             child: Text(translate("start")),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showColorRevealDialog() {
+    final c = context.appColors;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _ColorRevealDialog(
+        colors: c,
+        player1IsWhite: _player1IsWhite,
+        player1Name: _player1Name,
+        player2Name: _player2Name,
+        translate: translate,
+        onDone: () {
+          Navigator.of(ctx).pop();
+          setState(() {
+            _mode = ChessMode.friend;
+            _gameStarted = true;
+            _initBoard();
+          });
+        },
       ),
     );
   }
@@ -1809,6 +1828,184 @@ class ChessScreenState extends State<ChessScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ColorRevealDialog extends StatefulWidget {
+  final AppColors colors;
+  final bool player1IsWhite;
+  final String player1Name;
+  final String player2Name;
+  final String Function(String) translate;
+  final VoidCallback onDone;
+
+  const _ColorRevealDialog({
+    required this.colors,
+    required this.player1IsWhite,
+    required this.player1Name,
+    required this.player2Name,
+    required this.translate,
+    required this.onDone,
+  });
+
+  @override
+  State<_ColorRevealDialog> createState() => _ColorRevealDialogState();
+}
+
+class _ColorRevealDialogState extends State<_ColorRevealDialog>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  bool _showWhite = true;
+  bool _revealed = false;
+  int _flipCount = 0;
+  static const int _totalFlips = 14;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _startFlipping();
+  }
+
+  void _startFlipping() {
+    Future.delayed(Duration(milliseconds: _getDelay()), () {
+      if (!mounted) return;
+      _flipCount++;
+      setState(() => _showWhite = !_showWhite);
+
+      if (_flipCount >= _totalFlips) {
+        // Final state matches the actual result
+        setState(() {
+          _showWhite = widget.player1IsWhite;
+          _revealed = true;
+        });
+      } else {
+        _startFlipping();
+      }
+    });
+  }
+
+  int _getDelay() {
+    // Start fast, slow down towards the end
+    if (_flipCount < 6) return 120;
+    if (_flipCount < 10) return 200;
+    if (_flipCount < 12) return 350;
+    return 500;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    final whiteName = widget.player1IsWhite
+        ? widget.player1Name
+        : widget.player2Name;
+
+    return AlertDialog(
+      backgroundColor: c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Text(
+            _revealed
+                ? widget.translate("color_decided")
+                : widget.translate("drawing_color"),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: c.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 24),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 150),
+            transitionBuilder: (child, animation) {
+              return ScaleTransition(scale: animation, child: child);
+            },
+            child: Container(
+              key: ValueKey<bool>(_showWhite),
+              width: 90,
+              height: 90,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _showWhite
+                    ? const Color(0xFFF0EDE8)
+                    : const Color(0xFF333333),
+                border: Border.all(
+                  color: _showWhite
+                      ? const Color(0xFFCCC8C3)
+                      : const Color(0xFF555555),
+                  width: 3,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Center(child: pieceWidget(_showWhite ? wKing : bKing, 52)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          AnimatedOpacity(
+            opacity: _revealed ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 400),
+            child: Column(
+              children: [
+                Text(
+                  "${widget.translate("white_starts")}:",
+                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  whiteName,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (_revealed)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: widget.onDone,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: c.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  widget.translate("lets_play"),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
