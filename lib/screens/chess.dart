@@ -1855,52 +1855,93 @@ class _ColorRevealDialog extends StatefulWidget {
 }
 
 class _ColorRevealDialogState extends State<_ColorRevealDialog>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  bool _showWhite = true;
+    with TickerProviderStateMixin {
+  late AnimationController _spinController;
+  late Animation<double> _spinAnimation;
+  late AnimationController _bounceController;
+  late Animation<double> _bounceAnimation;
+  late AnimationController _glowController;
+  late Animation<double> _glowAnimation;
+
   bool _revealed = false;
-  int _flipCount = 0;
-  static const int _totalFlips = 14;
+  bool _showWhite = true;
+  double _lastValue = 0;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+
+    // Main spin: starts fast, decelerates smoothly over ~3s
+    _spinController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 3000),
     );
-    _startFlipping();
-  }
+    // Total rotation in "turns" — enough flips to feel random
+    _spinAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _spinController, curve: Curves.easeOutExpo),
+    );
 
-  void _startFlipping() {
-    Future.delayed(Duration(milliseconds: _getDelay()), () {
-      if (!mounted) return;
-      _flipCount++;
-      setState(() => _showWhite = !_showWhite);
+    // Bounce when revealed
+    _bounceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _bounceAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _bounceController, curve: Curves.elasticOut),
+    );
 
-      if (_flipCount >= _totalFlips) {
-        // Final state matches the actual result
+    // Glow pulse
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _glowAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
+
+    _spinAnimation.addListener(_onSpinUpdate);
+    _spinController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
         setState(() {
           _showWhite = widget.player1IsWhite;
           _revealed = true;
         });
-      } else {
-        _startFlipping();
+        _bounceController.forward();
+        _glowController.repeat(reverse: true);
       }
+    });
+
+    // Small delay before starting
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _spinController.forward();
     });
   }
 
-  int _getDelay() {
-    // Start fast, slow down towards the end
-    if (_flipCount < 6) return 120;
-    if (_flipCount < 10) return 200;
-    if (_flipCount < 12) return 350;
-    return 500;
+  void _onSpinUpdate() {
+    // Map the 0→1 animation to multiple flips (about 10 half-turns)
+    final totalHalfTurns = 10;
+    final progress = _spinAnimation.value * totalHalfTurns;
+    final halfTurnIndex = progress.floor();
+
+    // Flip the piece each time we cross a half-turn boundary
+    if (halfTurnIndex != _lastValue.floor()) {
+      setState(() => _showWhite = !_showWhite);
+    }
+    _lastValue = progress;
+    setState(() {}); // for rotation transform
+  }
+
+  double get _currentRotation {
+    final totalHalfTurns = 10;
+    return _spinAnimation.value * totalHalfTurns * 3.14159;
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _spinAnimation.removeListener(_onSpinUpdate);
+    _spinController.dispose();
+    _bounceController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
 
@@ -1918,93 +1959,139 @@ class _ColorRevealDialogState extends State<_ColorRevealDialog>
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(height: 8),
-          Text(
-            _revealed
-                ? widget.translate("color_decided")
-                : widget.translate("drawing_color"),
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: c.textSecondary,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Text(
+              _revealed
+                  ? widget.translate("color_decided")
+                  : widget.translate("drawing_color"),
+              key: ValueKey(_revealed),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: c.textSecondary,
+              ),
             ),
           ),
-          const SizedBox(height: 24),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 150),
-            transitionBuilder: (child, animation) {
-              return ScaleTransition(scale: animation, child: child);
-            },
-            child: Container(
-              key: ValueKey<bool>(_showWhite),
-              width: 90,
-              height: 90,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _showWhite
-                    ? const Color(0xFFF0EDE8)
-                    : const Color(0xFF333333),
-                border: Border.all(
-                  color: _showWhite
-                      ? const Color(0xFFCCC8C3)
-                      : const Color(0xFF555555),
-                  width: 3,
+          const SizedBox(height: 28),
+          AnimatedBuilder(
+            animation: Listenable.merge([
+              _spinAnimation,
+              _bounceAnimation,
+              _glowAnimation,
+            ]),
+            builder: (context, child) {
+              final scale = _revealed ? _bounceAnimation.value : 1.0;
+              final glowOpacity = _revealed ? _glowAnimation.value * 0.4 : 0.0;
+              final pieceColor = _showWhite
+                  ? const Color(0xFFF0EDE8)
+                  : const Color(0xFF333333);
+              final borderColor = _showWhite
+                  ? const Color(0xFFCCC8C3)
+                  : const Color(0xFF555555);
+
+              return Transform.scale(
+                scale: scale,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: _revealed
+                      ? Matrix4.identity()
+                      : (Matrix4.identity()
+                          ..setEntry(3, 2, 0.001)
+                          ..rotateY(_currentRotation)),
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: pieceColor,
+                      border: Border.all(color: borderColor, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                        if (_revealed)
+                          BoxShadow(
+                            color:
+                                (_showWhite
+                                        ? const Color(0xFFFFD54F)
+                                        : const Color(0xFF90A4AE))
+                                    .withValues(alpha: glowOpacity),
+                            blurRadius: 24,
+                            spreadRadius: 4,
+                          ),
+                      ],
+                    ),
+                    child: Center(
+                      child: pieceWidget(_showWhite ? wKing : bKing, 56),
+                    ),
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+          AnimatedOpacity(
+            opacity: _revealed ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
+            child: AnimatedSlide(
+              offset: _revealed ? Offset.zero : const Offset(0, 0.3),
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOut,
+              child: Column(
+                children: [
+                  Text(
+                    "${widget.translate("white_starts")}:",
+                    style: TextStyle(fontSize: 14, color: c.textSecondary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    whiteName,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: c.textPrimary,
+                    ),
                   ),
                 ],
               ),
-              child: Center(child: pieceWidget(_showWhite ? wKing : bKing, 52)),
             ),
           ),
           const SizedBox(height: 20),
           AnimatedOpacity(
             opacity: _revealed ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 400),
-            child: Column(
-              children: [
-                Text(
-                  "${widget.translate("white_starts")}:",
-                  style: TextStyle(fontSize: 14, color: c.textSecondary),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  whiteName,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: c.textPrimary,
+            curve: Curves.easeOut,
+            child: AnimatedSlide(
+              offset: _revealed ? Offset.zero : const Offset(0, 0.5),
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOut,
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _revealed ? widget.onDone : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: c.accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (_revealed)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: widget.onDone,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: c.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  widget.translate("lets_play"),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
+                  child: Text(
+                    widget.translate("lets_play"),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
